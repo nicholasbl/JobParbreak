@@ -111,6 +111,8 @@ class Server:
         reference to the server object, needed for issuing a shutdown, etc
     prompt : APrompt
         the async prompt object we use to get commands from the console    
+    conn_list : set
+        the set of connected clients
     '''
 
     def __init__(self, opt_file) -> None:
@@ -120,6 +122,7 @@ class Server:
         self.server_command_db = {}
         self.server_link = None
         self.prompt = APrompt()
+        self.conn_list = set()
 
         loop = asyncio.get_event_loop()
         loop.create_task(self.run_prompt())
@@ -197,6 +200,10 @@ class Server:
         '''Created as a new task whenever a new client connects'''
         assigned = None
 
+        peer = writer.get_extra_info("peername")
+
+        self.conn_list.add(peer)
+
         while True:
             data = await reader.read(2048)
             data = data.decode()
@@ -207,6 +214,8 @@ class Server:
 
             writer.write(to_send.encode())
             await writer.drain()
+
+        self.conn_list.discard(peer)
 
     async def c_progress(self, l):
         '''User is asking for progress info'''
@@ -229,6 +238,12 @@ class Server:
         '''User wants to clear all pending jobs'''
         self.server_command_pending_list.clear()
 
+    async def c_who(self, l):
+        '''User wants a list of all connected clients'''
+        print("Connected clients:")
+        for i in self.conn_list:
+            print(f" - {i}")
+
     async def c_exit(self, l):
         '''User wants to close this server down'''
         self.server_link.close()
@@ -240,6 +255,7 @@ class Server:
             "progress": self.c_progress,
             "add": self.c_add,
             "clear": self.c_clear,
+            "who": self.c_who,
             "exit": self.c_exit,
         }
 
