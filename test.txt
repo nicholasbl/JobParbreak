@@ -1,0 +1,6 @@
+sleep 5; exit 1
+sleep 3; exit 0
+sleep 6; exit 0
+sleep 2; exit 0
+sleep 1; exit 0
+sleep 2; exit 0
