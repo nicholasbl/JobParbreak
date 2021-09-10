@@ -35,7 +35,7 @@ MessageType decode_message(QByteArray data) {
         auto mobj = obj[JSON_ASSIGNMENT].toObject();
 
         MessageAssignment ret;
-        ret.id      = QUuid::fromString(mobj["id"].toString());
+        ret.id      = QUuid(mobj["id"].toString());
         ret.command = mobj["command"].toString();
 
         return ret;
@@ -44,7 +44,7 @@ MessageType decode_message(QByteArray data) {
         auto mobj = obj[JSON_SUCCESS].toObject();
 
         MessageSuccess ret;
-        ret.completed = QUuid::fromString(mobj["id"].toString());
+        ret.completed = QUuid(mobj["id"].toString());
         ret.std_out   = mobj["std_out"].toString();
         ret.std_err   = mobj["std_err"].toString();
 
@@ -54,7 +54,7 @@ MessageType decode_message(QByteArray data) {
         auto mobj = obj[JSON_FAILED].toObject();
 
         MessageFailed ret;
-        ret.failed  = QUuid::fromString(mobj["id"].toString());
+        ret.failed  = QUuid(mobj["id"].toString());
         ret.std_out = mobj["std_out"].toString();
         ret.std_err = mobj["std_err"].toString();
 
