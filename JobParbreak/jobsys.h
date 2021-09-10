@@ -11,6 +11,7 @@
 #include <QWebSocketServer>
 
 #include <optional>
+#include <variant>
 
 enum class JobStatus { PENDING, IN_WORK, DONE, FAILED };
 
