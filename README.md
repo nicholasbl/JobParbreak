@@ -4,7 +4,7 @@ A super simple job distribution system in python.
 The single script can be used as a server to host commands (such as blender render command lines) and can act as a client to execute them.
 
 ## Requirements
-Just a working python >3.6 environment. The script requires no other packages
+Just a working python >= 3.7 environment. The script requires no other packages
 
 ## Input
 At the moment the input is a simple text file with shell commands to be executed. They can be passed to the script at startup or new files can be added while it is running.

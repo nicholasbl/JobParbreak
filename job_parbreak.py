@@ -124,13 +124,14 @@ class Server:
         self.prompt = APrompt()
         self.conn_list = set()
 
-        loop = asyncio.get_event_loop()
-        loop.create_task(self.run_prompt())
-
         if opt_file is not None:
             lines = opt_file.readlines()
 
             self.server_load_list(lines)
+
+    def setup_prompt(self):
+        loop = asyncio.get_event_loop()
+        loop.create_task(self.run_prompt())
 
     def server_load_list(self, lines):
         '''Add lines of commands to the database and to the pending list'''
@@ -259,7 +260,6 @@ class Server:
             "exit": self.c_exit,
         }
 
-        await asyncio.sleep(2)
         while True:
             text = await self.prompt(">>> ")
             parts = text.split()
@@ -287,6 +287,7 @@ async def as_server(command_file, port):
     address = server.sockets[0].getsockname()
     print("Serving on: ", address)
 
+    job_server.setup_prompt()
     try:
         async with server:
             await server.serve_forever()
