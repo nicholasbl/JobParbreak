@@ -2,6 +2,9 @@
 
 #include <QCommandLineParser>
 #include <QCoreApplication>
+#include <QLoggingCategory>
+
+#include <memory>
 
 int main(int argc, char* argv[]) {
     QCoreApplication a(argc, argv);
