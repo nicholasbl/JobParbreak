@@ -8,7 +8,9 @@
 #include <QJsonObject>
 #include <QJsonValue>
 
+#include <cassert>
 #include <iostream>
+#include <variant>
 
 // classic visitor helper
 template <class... Ts>
@@ -396,7 +398,11 @@ void Server::on_console_text(QString text) {
     };
 
     // regex gets hairy with qt6 and qt5...
+#if QT_VERSION > QT_VERSION_CHECK(5, 14, 0)
     auto parts = text.trimmed().split(' ', Qt::SkipEmptyParts);
+#else
+    auto parts = text.trimmed().split(' ');
+#endif
 
     if (parts.isEmpty()) return;
 
