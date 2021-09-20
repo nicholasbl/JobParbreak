@@ -3,6 +3,7 @@
 
 #include <QPointer>
 #include <QProcess>
+#include <QQueue>
 #include <QSocketNotifier>
 #include <QString>
 #include <QThread>
@@ -81,7 +82,9 @@ public:
     Worker(QPointer<QWebSocket>, QObject* parent);
     virtual ~Worker();
 
-    bool has_assignment() const;
+    QString name() const;
+    bool    has_assignment() const;
+    QUuid   assignment_id() const;
 
 private slots:
     void on_conn_closed();
@@ -112,7 +115,7 @@ class Server : public QObject {
 
     AsyncPrompt* m_prompt;
 
-    QVector<QUuid>          m_pending_jobs;
+    QQueue<QUuid>           m_pending_jobs;
     QHash<QUuid, JobRecord> m_jobs;
     QVector<QUuid>          m_failed_jobs;
 
@@ -121,7 +124,10 @@ class Server : public QObject {
     void enqueue(QVector<QUuid>);
 
     void c_exit(QStringList const&);
-    void c_progress(QStringList const&);
+    void c_haltsave(QStringList const&);
+    void c_restore(QStringList const&);
+    void c_status(QStringList const&);
+    void c_clear(QStringList const&);
     void c_add(QStringList const&);
 
 public:

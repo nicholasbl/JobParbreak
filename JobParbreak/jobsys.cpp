@@ -105,6 +105,19 @@ QByteArray encode_message(MessageFailed const& m) {
 
 // =============================================================================
 
+QDataStream& operator<<(QDataStream& stream, JobRecord const& r) {
+    stream << r.id << r.command << r.status;
+    return stream;
+}
+QDataStream& operator>>(QDataStream& stream, JobRecord& r) {
+    stream >> r.id;
+    stream >> r.command;
+    stream >> r.status;
+    return stream;
+}
+
+// =============================================================================
+
 // Following https://github.com/juangburgos/QConsoleListener
 
 AsyncPrompt::AsyncPrompt(QObject* parent) : QObject(parent) {
@@ -167,8 +180,16 @@ Worker::Worker(QPointer<QWebSocket> s, QObject* parent)
 }
 Worker::~Worker() = default;
 
+QString Worker::name() const {
+    return m_socket ? m_socket->origin() : QString("<zombie>");
+}
+
 bool Worker::has_assignment() const {
     return m_assignment.has_value();
+}
+
+QUuid Worker::assignment_id() const {
+    return m_assignment ? m_assignment->id : QUuid();
 }
 
 void Worker::on_conn_closed() {
@@ -237,8 +258,7 @@ void Server::assign_work_to(Worker* w) {
 
     if (w->has_assignment()) return;
 
-    auto next = m_pending_jobs.back();
-    m_pending_jobs.pop_back();
+    auto next = m_pending_jobs.dequeue();
 
     assert(m_jobs.count(next));
 
@@ -263,11 +283,127 @@ void Server::c_exit(QStringList const&) {
     qInfo() << "Closing down server...";
     QCoreApplication::quit();
 }
-void Server::c_progress(QStringList const&) {
+
+void Server::c_haltsave(QStringList const& args) {
+    if (args.empty()) {
+        qInfo() << "Need a filename";
+        return;
+    }
+
+    if (m_pending_jobs.size()) {
+        qInfo()
+            << "Please clear pending jobs and wait for workers to complete.";
+        return;
+    }
+
+    for (auto const& v : m_jobs) {
+        if (v.status == JobStatus::IN_WORK) {
+            qInfo() << "Please wait for workers to complete.";
+            return;
+        }
+    }
+
+    QFile file(args.value(0));
+
+    bool ok = file.open(QFile::WriteOnly);
+
+    if (!ok) {
+        qInfo() << "Unable to open file for writing.";
+        return;
+    }
+
+    {
+        QDataStream outf(&file);
+
+        outf << m_jobs;
+    }
+
+    file.close();
+
+    qInfo() << "State written. You can stop the server when clients are done.";
+}
+void Server::c_restore(QStringList const& args) {
+    if (args.empty()) {
+        qInfo() << "Need a filename";
+        return;
+    }
+
+    QFile file(args.value(0));
+
+    bool ok = file.open(QFile::ReadOnly);
+
+    if (!ok) {
+        qInfo() << "Unable to open file for reading.";
+        return;
+    }
+
+    QVector<QUuid> to_add;
+
+    QHash<QUuid, JobRecord> tmp;
+
+    {
+        QDataStream inf(&file);
+
+        inf >> tmp;
+    }
+
+    auto iter = tmp.begin();
+
+    while (iter != tmp.end()) {
+
+        auto state = iter.value().status;
+
+        if (state == JobStatus::PENDING) {
+            ++iter;
+            to_add << iter.value().id;
+            continue;
+        }
+
+        // delete others
+
+        iter = tmp.erase(iter);
+    }
+
+    m_jobs.insert(tmp);
+
+    qInfo() << "State loaded...";
+
+    enqueue(to_add);
+}
+
+void Server::c_status(QStringList const&) {
     qInfo() << m_pending_jobs.size() << "jobs in queue";
     if (m_failed_jobs.size()) {
         qInfo() << m_failed_jobs.size() << "jobs failed";
     }
+
+    qInfo() << "Workers:";
+
+    for (auto w : m_clients) {
+        if (w->has_assignment()) {
+            qInfo() << "-" << w->name() << ":" << w->assignment_id();
+        } else {
+            qInfo() << "-" << w->name() << ":"
+                    << "idle";
+        }
+    }
+}
+void Server::c_clear(QStringList const& args) {
+    using FType = std::function<void()>;
+
+    const QHash<QString, FType> commands = {
+        { "pending", [this]() { m_pending_jobs.clear(); } },
+    };
+
+    if (args.empty() or !commands.contains(args.value(0))) {
+        qInfo() << "Clear what?";
+        for (auto const& k : commands.keys()) {
+            qInfo() << "-" << k;
+        }
+        return;
+    }
+
+    commands[args.value(0)]();
 }
 void Server::c_add(QStringList const& args) {
     auto source = args.value(0);
@@ -325,7 +461,7 @@ void Server::add_file(QString filename) {
 
         m_jobs[rec.id] = rec;
 
-        m_pending_jobs << rec.id;
+        m_pending_jobs.enqueue(rec.id);
         counter++;
     }
 
@@ -372,15 +508,9 @@ void Server::on_worker_success(MessageSuccess m, double seconds) {
     qDebug() << Q_FUNC_INFO;
     m_jobs[m.completed].status = JobStatus::DONE;
 
-    if (m_pending_jobs.size()) {
-        // super crude
-        auto time = QDateTime::currentDateTime();
-        time      = time.addSecs(seconds * m_pending_jobs.size());
-        qInfo() << "Job" << m.completed.toString() << "done: completion at"
-                << time.toString();
-    } else {
-        qInfo() << "Job" << m.completed.toString() << "done.";
-    }
+    auto time = QTime::fromMSecsSinceStartOfDay(seconds * 1000);
+
+    qInfo() << "Job" << m.completed.toString() << "done in:" << time.toString();
 }
 
 void Server::on_worker_wants_work() {
@@ -392,9 +522,9 @@ void Server::on_worker_wants_work() {
 void Server::on_console_text(QString text) {
     using FType = void (Server::*)(QStringList const&);
     static const QHash<QString, FType> commands = {
-        { "exit", &Server::c_exit },
-        { "progress", &Server::c_progress },
-        { "add", &Server::c_add },
+        { "exit", &Server::c_exit },       { "haltsave", &Server::c_haltsave },
+        { "restore", &Server::c_restore }, { "status", &Server::c_status },
+        { "clear", &Server::c_clear },     { "add", &Server::c_add },
     };
 
     // regex gets hairy with qt6 and qt5...
