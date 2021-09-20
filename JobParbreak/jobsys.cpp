@@ -106,6 +106,19 @@ QByteArray encode_message(MessageFailed const& m) {
 
 // =============================================================================
 
+
+QDataStream& operator<<(QDataStream& stream, JobStatus const& r) {
+    stream << std::underlying_type_t<JobStatus>(r);
+    return stream;
+}
+QDataStream& operator>>(QDataStream& stream, JobStatus& r) {
+    std::underlying_type_t<JobStatus> v;
+    stream >> v;
+    r = (JobStatus)v;
+    return stream;
+}
+
+
 QDataStream& operator<<(QDataStream& stream, JobRecord const& r) {
     stream << r.id << r.command << r.status;
     return stream;
