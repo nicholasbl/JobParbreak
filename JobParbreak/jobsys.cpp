@@ -287,7 +287,7 @@ void Server::assign_work_to(Worker* w) {
 
 void Server::enqueue(QVector<QUuid> new_items) {
     qDebug() << Q_FUNC_INFO;
-    m_pending_jobs << new_items;
+    m_pending_jobs.append(new_items);
 
     emit work_available();
 }
