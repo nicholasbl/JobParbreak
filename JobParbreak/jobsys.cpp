@@ -1,6 +1,7 @@
 #include "jobsys.h"
 
 #include <QCoreApplication>
+#include <QDataStream>
 #include <QDebug>
 #include <QFile>
 #include <QHostInfo>
