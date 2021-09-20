@@ -381,7 +381,13 @@ void Server::c_restore(QStringList const& args) {
         iter = tmp.erase(iter);
     }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     m_jobs.insert(tmp);
+#else
+    for (auto iter = tmp.begin(); iter != tmp.end(); iter++) {
+        m_jobs[iter.key()] = iter.value();
+    }
+#endif
 
     qInfo() << "State loaded...";
 
