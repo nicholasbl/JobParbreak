@@ -68,9 +68,27 @@ private slots:
 
 // =============================================================================
 
+class RemoteCommand : public QObject {
+    Q_OBJECT
+    QString  m_remote_host;
+    QString  m_exe_path;
+    uint16_t m_port;
+
+public:
+    RemoteCommand(QString remote_host, QString exe_path, uint16_t, QObject*);
+
+    void start();
+
+public slots:
+    void on_finished(int exit_code, QProcess::ExitStatus);
+};
+
+// =============================================================================
+
 class Worker : public QObject {
     Q_OBJECT
     QPointer<QWebSocket> m_socket;
+    size_t               m_worker_id;
 
     std::optional<JobAssignment> m_assignment;
     QDateTime                    m_start_time;
@@ -79,12 +97,18 @@ class Worker : public QObject {
     void on_message(MessageFailed const&);
 
 public:
-    Worker(QPointer<QWebSocket>, QObject* parent);
+    Worker(QPointer<QWebSocket>, size_t wid, QObject* parent);
     virtual ~Worker();
 
     QString name() const;
     bool    has_assignment() const;
     QUuid   assignment_id() const;
+
+    size_t worker_id() const { return m_worker_id; }
+
+    QString status_string() const;
+
+    void kill() const;
 
 private slots:
     void on_conn_closed();
@@ -111,6 +135,8 @@ class Server : public QObject {
 
     QWebSocketServer* m_socket_server;
 
+    size_t m_next_worker_id = 0;
+
     QSet<Worker*> m_clients;
 
     AsyncPrompt* m_prompt;
@@ -129,6 +155,7 @@ class Server : public QObject {
     void c_status(QStringList const&);
     void c_clear(QStringList const&);
     void c_add(QStringList const&);
+    void c_worker(QStringList const&);
 
 public:
     Server(uint16_t port);

@@ -167,6 +167,80 @@ void AsyncPrompt::on_get_new_line(QString line) {
 
 // =============================================================================
 
+RemoteCommand::RemoteCommand(QString  remote_host,
+                             QString  exe_path,
+                             uint16_t port,
+                             QObject* parent)
+    : QObject(parent),
+      m_remote_host(remote_host),
+      m_exe_path(exe_path),
+      m_port(port) { }
+
+void RemoteCommand::start() {
+    QProcess* p = new QProcess(this);
+
+    // in the future, we should probe for this
+
+    p->setProgram("/usr/bin/ssh");
+
+    QStringList args;
+
+    args << "-o"
+         << "PasswordAuthentication=no"
+         << "-f" << m_remote_host;
+
+    QString host =
+        QString("ws://%1:%2").arg(QHostInfo::localHostName()).arg(m_port);
+
+    qDebug() << Q_FUNC_INFO << host;
+
+    auto sarglist = QStringList()
+                    << "nohup" << m_exe_path << "-c" << host << "&";
+
+    args << sarglist.join(" ");
+
+    p->setArguments(args);
+
+    qDebug() << "Launching:" << args.join(" ");
+
+    connect(p,
+            QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this,
+            &RemoteCommand::on_finished);
+
+    connect(p, &QProcess::finished, this, &RemoteCommand::deleteLater);
+
+    p->start();
+}
+
+void RemoteCommand::on_finished(int exit_code, QProcess::ExitStatus status) {
+    auto* p = qobject_cast<QProcess*>(sender());
+
+    if (!p) return;
+
+    qDebug() << Q_FUNC_INFO;
+
+    auto all_out = p->readAllStandardOutput();
+    auto all_err = p->readAllStandardError();
+
+    if (status == QProcess::CrashExit) {
+        qCritical() << "Unable to launch remote job, ssh crashed.";
+        qCritical() << all_err;
+        return;
+    }
+
+
+    if (exit_code != 0) {
+        qCritical() << "Unable to launch remote job, job failed.";
+        qCritical() << all_err;
+        return;
+    }
+
+    qInfo() << "Job launched:" << all_out;
+}
+
+// =============================================================================
+
 void Worker::on_message(MessageSuccess const& m) {
     assert(m_assignment);
     assert(m.completed == m_assignment->id);
@@ -183,8 +257,8 @@ void Worker::on_message(MessageFailed const& m) {
     emit want_new_work();
 }
 
-Worker::Worker(QPointer<QWebSocket> s, QObject* parent)
-    : QObject(parent), m_socket(s) {
+Worker::Worker(QPointer<QWebSocket> s, size_t wid, QObject* parent)
+    : QObject(parent), m_socket(s), m_worker_id(wid) {
 
     qInfo() << "Connection from" << s->origin();
 
@@ -206,7 +280,18 @@ QUuid Worker::assignment_id() const {
     return m_assignment ? m_assignment->id : QUuid();
 }
 
+QString Worker::status_string() const {
+    QString st = has_assignment() ? assignment_id().toString() : "idle";
+
+    return QString("- %1 %2 : %3").arg(m_worker_id).arg(name()).arg(st);
+}
+
+void Worker::kill() const {
+    m_socket->close();
+}
+
 void Worker::on_conn_closed() {
+    qInfo() << "Worker" << m_worker_id << "disconnected.";
     qDebug() << Q_FUNC_INFO;
     if (m_assignment) {
         MessageFailed f;
@@ -403,12 +488,8 @@ void Server::c_status(QStringList const&) {
     qInfo() << "Workers:";
 
     for (auto w : m_clients) {
-        if (w->has_assignment()) {
-            qInfo() << "-" << w->name() << ":" << w->assignment_id();
-        } else {
-            qInfo() << "-" << w->name() << ":"
-                    << "idle";
-        }
+        auto info = qInfo();
+        info.noquote() << w->status_string();
     }
 }
 void Server::c_clear(QStringList const& args) {
@@ -433,6 +514,70 @@ void Server::c_add(QStringList const& args) {
     qInfo() << "Sourcing new jobs from" << source;
 
     add_file(source);
+}
+
+void Server::c_worker(QStringList const& args) {
+    using FType = std::function<void()>;
+
+    auto subcommand = args.value(0);
+
+    auto subcommand_args = args;
+    if (subcommand_args.size()) { subcommand_args.pop_front(); }
+
+    auto list_workers = [this]() {
+        qInfo() << "Workers:";
+
+        for (auto w : m_clients) {
+            auto info = qInfo();
+            info.noquote() << w->status_string();
+        }
+    };
+
+    auto add_worker = [this, &subcommand_args]() {
+        auto host     = subcommand_args.value(0);
+        auto exe_path = subcommand_args.value(1);
+
+        if (exe_path.isEmpty()) {
+            exe_path = QCoreApplication::applicationDirPath();
+        }
+
+        auto* p = new RemoteCommand(
+            host, exe_path, m_socket_server->serverPort(), this);
+        p->start();
+    };
+
+
+    auto drop_worker = [this, &subcommand_args]() {
+        auto s_id = subcommand_args.value(0);
+
+        if (s_id.isEmpty()) return;
+
+        bool ok = false;
+
+        auto int_id = s_id.toUInt(&ok);
+
+        if (!ok) return;
+
+        for (auto w : m_clients) {
+            if (w->worker_id() != int_id) continue;
+
+            w->kill();
+            break;
+        }
+    };
+
+    const QHash<QString, FType> sub_commands = { { "list", list_workers },
+                                                 { "add", add_worker },
+                                                 { "drop", drop_worker } };
+
+    auto iter = sub_commands.find(subcommand);
+
+    if (iter == sub_commands.end()) {
+        qInfo() << "Unknown worker subcommand";
+        return;
+    }
+
+    iter.value()();
 }
 
 Server::Server(uint16_t port) {
@@ -499,7 +644,9 @@ void Server::on_new_connection() {
     auto* socket = m_socket_server->nextPendingConnection();
 
 
-    auto* worker = new Worker(socket, this);
+    auto* worker = new Worker(socket, m_next_worker_id, this);
+
+    m_next_worker_id++;
 
     connect(worker, &Worker::disconnected, this, &Server::on_client_lost);
 
@@ -548,6 +695,7 @@ void Server::on_console_text(QString text) {
         { "exit", &Server::c_exit },       { "haltsave", &Server::c_haltsave },
         { "restore", &Server::c_restore }, { "status", &Server::c_status },
         { "clear", &Server::c_clear },     { "add", &Server::c_add },
+        { "worker", &Server::c_worker },
     };
 
     // regex gets hairy with qt6 and qt5...
@@ -561,7 +709,10 @@ void Server::on_console_text(QString text) {
 
     auto iter = commands.find(parts[0]);
 
-    if (iter == commands.end()) { qInfo() << "Unknown command" << text; }
+    if (iter == commands.end()) {
+        qInfo() << "Unknown command" << text;
+        return;
+    }
 
     parts.removeFirst();
 
