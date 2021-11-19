@@ -38,6 +38,12 @@ int main(int argc, char* argv[]) {
                                    tl("file"));
     parser.addOption(text_option);
 
+    QCommandLineOption hostlist_option(
+        { "h", "hostlist" },
+        tl("Launch clients from the given host list."),
+        tl("file"));
+    parser.addOption(text_option);
+
 
     QCommandLineOption debug_option({ "d", "debug" },
                                     tl("Enable debug output"));
@@ -73,6 +79,10 @@ int main(int argc, char* argv[]) {
 
         if (parser.isSet(text_option)) {
             server->add_file(parser.value(text_option));
+        }
+
+        if (parser.isSet(hostlist_option)) {
+            server->add_clients(parser.value(hostlist_option));
         }
     }
 

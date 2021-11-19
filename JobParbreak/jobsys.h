@@ -162,6 +162,7 @@ public:
     virtual ~Server();
 
     void add_file(QString);
+    void add_clients(QString);
 
 signals:
     void work_available();

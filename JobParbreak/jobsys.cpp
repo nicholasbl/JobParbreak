@@ -201,7 +201,7 @@ void RemoteCommand::start() {
 
     p->setArguments(args);
 
-    qDebug() << "Launching:" << args.join(" ");
+    qInfo() << "Launching:" << args.join(" ");
 
     connect(p,
             QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
@@ -537,8 +537,10 @@ void Server::c_worker(QStringList const& args) {
         auto host     = subcommand_args.value(0);
         auto exe_path = subcommand_args.value(1);
 
+        if (host.isEmpty()) return;
+
         if (exe_path.isEmpty()) {
-            exe_path = QCoreApplication::applicationDirPath();
+            exe_path = QCoreApplication::applicationFilePath();
         }
 
         auto* p = new RemoteCommand(
@@ -637,6 +639,39 @@ void Server::add_file(QString filename) {
             << "now pending";
 
     emit work_available();
+}
+
+void Server::add_clients(QString filename) {
+    qDebug() << Q_FUNC_INFO << filename;
+
+    QFile file(filename);
+
+    if (!file.open(QFile::ReadOnly)) {
+        qCritical() << "Unable to open file" << filename;
+        return;
+    }
+
+    QTextStream stream(&file);
+
+    while (!stream.atEnd()) {
+        auto line = stream.readLine();
+
+        // read out hostname and path to exe
+        auto parts = line.split(" ", Qt::SkipEmptyParts);
+
+        if (parts.empty()) continue;
+
+        auto host     = parts.value(0);
+        auto exe_path = parts.value(1);
+
+        if (exe_path.isEmpty()) {
+            exe_path = QCoreApplication::applicationFilePath();
+        }
+
+        auto* p = new RemoteCommand(
+            host, exe_path, m_socket_server->serverPort(), this);
+        p->start();
+    }
 }
 
 void Server::on_new_connection() {
