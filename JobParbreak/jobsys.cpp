@@ -208,12 +208,12 @@ void RemoteCommand::start() {
             this,
             &RemoteCommand::on_finished);
 
-    connect(p, &QProcess::finished, this, &RemoteCommand::deleteLater);
-
     p->start();
 }
 
 void RemoteCommand::on_finished(int exit_code, QProcess::ExitStatus status) {
+    deleteLater();
+
     auto* p = qobject_cast<QProcess*>(sender());
 
     if (!p) return;
